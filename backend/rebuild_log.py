@@ -192,14 +192,6 @@ WHERE id = %(id)s
   AND deleted = 0
 """
 
-DELETE_SQL = """
-UPDATE public.wuwa_rebuild_log
-SET deleted = 1, updated_at = NOW()
-WHERE id = %(id)s
-  AND deleted = 0
-RETURNING id
-"""
-
 UPDATE_UPLOADED_IMAGE_SQL = """
 UPDATE public.wuwa_rebuild_log
 SET uploaded_image = %(uploaded_image)s,
@@ -549,17 +541,6 @@ def get_rebuild_log(log_id: int) -> RebuildLogDetail | None:
         "updated_at": row["updated_at"].isoformat() if row["updated_at"] else None,
         "payload": payload,
     }
-
-
-def delete_rebuild_log(log_id: int) -> bool:
-    with _get_connection() as connection:
-        with connection.cursor() as cursor:
-            cursor.execute(DELETE_SQL, {"id": log_id})
-            row = cursor.fetchone()
-        connection.commit()
-    return row is not None
-
-
 def update_rebuild_log_uploaded_image(log_id: int, uploaded_image: str) -> bool:
     with _get_connection() as connection:
         with connection.cursor() as cursor:

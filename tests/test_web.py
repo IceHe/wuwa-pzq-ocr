@@ -196,13 +196,6 @@ class WebAppTest(unittest.TestCase):
         self.assertEqual(response.get_json(), {"ok": True, "item": {"id": 7, "locked_count": 1, "locked_positions": [2], "uploaded_image": "N_test_20260402_120102.png", "payload": {"filename": "a.png"}}})
         get_rebuild_log.assert_called_once_with(7)
 
-    @patch("backend.app.delete_rebuild_log", return_value=True)
-    def test_delete_rebuild_log(self, delete_rebuild_log) -> None:
-        response = self.client.delete("/api/rebuild_log/8")
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.get_json(), {"ok": True, "id": 8})
-        delete_rebuild_log.assert_called_once_with(8)
-
     def test_build_uploaded_image_name_uses_nickname_when_present(self) -> None:
         filename = build_uploaded_image_name(
             uploader_nickname="IceHe 上传者",

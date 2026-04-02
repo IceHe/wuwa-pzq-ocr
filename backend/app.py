@@ -10,7 +10,6 @@ from pathlib import Path
 from flask import Flask, jsonify, render_template, request, send_from_directory
 
 from backend.rebuild_log import (
-    delete_rebuild_log,
     get_rebuild_log,
     insert_rebuild_log,
     list_rebuild_logs,
@@ -221,19 +220,6 @@ def create_app() -> Flask:
             return jsonify({"ok": False, "error": "not_found"}), 404
 
         return jsonify({"ok": True, "item": item})
-
-    @app.delete("/api/rebuild_log/<int:log_id>")
-    @app.delete("/browser-ocr/api/rebuild_log/<int:log_id>")
-    def remove_rebuild_log(log_id: int):
-        try:
-            deleted = delete_rebuild_log(log_id)
-        except Exception as exc:
-            return jsonify({"ok": False, "error": str(exc)}), 500
-
-        if not deleted:
-            return jsonify({"ok": False, "error": "not_found"}), 404
-
-        return jsonify({"ok": True, "id": log_id})
 
     @app.get("/browser-ocr/static/<path:filename>")
     def prefixed_static(filename: str):
