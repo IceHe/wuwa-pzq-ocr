@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>声骸频整识别记录</title>
+    <link rel="icon" type="image/svg+xml" href="./static/favicon.svg?v=20260402b" />
+    <link rel="stylesheet" href="./static/styles.css?v=20260402b" />
+  </head>
+  <body>
+    <div class="page-shell">
+      <header class="hero">
+        <div class="hero-copy">
+          <p class="eyebrow">Wuthering Waves OCR</p>
+          <h1>声骸频整识别记录</h1>
+          <p>浏览器本地识别，识别成功后上传词条、特征码和图片。感谢各位支持 <a href="https://space.bilibili.com/13378662" target="_blank" rel="noreferrer">IceHe</a> 的统计。</p>
+        </div>
+      </header>
+
+      <main class="layout">
+        <section class="panel upload-panel">
+          <div class="panel-head">
+            <h2>上传游戏窗口完整截图</h2>
+            <span class="hint">支持 Ctrl/Cmd + V</span>
+          </div>
+
+          <p class="panel-note">识别在浏览器内完成，首次会下载 WASM OCR 资源。</p>
+
+          <label class="dropzone" id="dropzone" for="file-input">
+            <input id="file-input" type="file" accept="image/png,image/jpeg,image/webp" hidden />
+            <span class="dropzone-title">点击选择图片，或直接粘贴到这里</span>
+            <span class="dropzone-subtitle">推荐使用 1920x1080 或接近比例的截图</span>
+          </label>
+
+          <div class="preview-card" id="preview-card" hidden>
+            <div class="preview-meta">
+              <span id="preview-name">未选择图片</span>
+              <div class="preview-actions">
+                <button id="zoom-button" type="button" class="ghost-button">放大查看</button>
+                <button id="clear-button" type="button" class="ghost-button">清空</button>
+              </div>
+            </div>
+            <button id="preview-open" type="button" class="image-button" aria-label="放大图片">
+              <img id="preview-image" alt="预览图" />
+            </button>
+          </div>
+
+          <section class="uploader-card" aria-labelledby="uploader-info-title">
+            <div class="panel-head uploader-head">
+              <h2 id="uploader-info-title">上传者信息</h2>
+              <span class="hint">全部选填</span>
+            </div>
+            <div class="uploader-grid">
+              <label class="form-field">
+                <span class="form-label">昵称</span>
+                <input id="uploader-nickname" type="text" maxlength="64" placeholder="用于标识和鸣谢上传者" />
+              </label>
+              <label class="form-field">
+                <span class="form-label">邮箱</span>
+                <input id="uploader-email" type="email" maxlength="128" placeholder="name@example.com" />
+              </label>
+              <label class="form-field">
+                <span class="form-label">微信</span>
+                <input id="uploader-wechat" type="text" maxlength="64" placeholder="微信号" />
+              </label>
+              <label class="form-field">
+                <span class="form-label">QQ</span>
+                <input id="uploader-qq" type="text" maxlength="32" placeholder="QQ 号码" />
+              </label>
+            </div>
+          </section>
+
+          <div class="actions">
+            <button id="submit-button" type="button" class="primary-button" disabled>开始识别</button>
+            <span id="status-text" class="status-text">等待上传</span>
+          </div>
+        </section>
+
+        <section class="panel result-panel">
+          <div class="panel-head">
+            <h2>识别结果</h2>
+            <span class="hint" id="result-filename">尚未识别</span>
+          </div>
+
+          <div class="summary-grid" id="summary-grid">
+            <article class="summary-card">
+              <span class="summary-label">User ID</span>
+              <strong id="user-id-text">-</strong>
+            </article>
+            <article class="summary-card">
+              <span class="summary-label">锁定数</span>
+              <strong id="locked-text">-</strong>
+            </article>
+          </div>
+
+          <div class="tables" id="tables" hidden>
+            <section>
+              <div class="section-head">
+                <div class="table-title">原词条</div>
+                <span class="hint">重构前</span>
+              </div>
+              <div id="original-table"></div>
+            </section>
+            <section>
+              <div class="section-head">
+                <div class="table-title">新词条</div>
+                <span class="hint">重构后</span>
+              </div>
+              <div id="new-table"></div>
+            </section>
+          </div>
+
+          <details class="json-card" id="json-card" hidden>
+            <summary class="json-summary">
+              <span class="table-title">原始 JSON</span>
+              <span class="hint">默认折叠</span>
+            </summary>
+            <pre id="json-output"></pre>
+          </details>
+
+          <section class="history-card">
+            <div class="panel-head history-head">
+              <div>
+                <h2>历史记录</h2>
+                <div class="hint" id="history-status">加载中</div>
+              </div>
+              <button id="history-refresh" type="button" class="ghost-button">刷新</button>
+            </div>
+            <div class="history-list" id="history-list"></div>
+            <div class="history-pager">
+              <button id="history-latest" type="button" class="ghost-button">最新页</button>
+              <button id="history-prev" type="button" class="ghost-button">上一页</button>
+              <span class="hint history-page-text" id="history-page-text">第 1 页</span>
+              <label class="history-jump">
+                <span class="hint">跳到</span>
+                <input id="history-page-input" type="number" min="1" step="1" value="1" />
+                <span class="hint">页</span>
+              </label>
+              <button id="history-jump" type="button" class="ghost-button">跳转</button>
+              <button id="history-next" type="button" class="ghost-button">下一页</button>
+            </div>
+          </section>
+        </section>
+      </main>
+    </div>
+
+    <div
+      id="image-modal"
+      class="image-modal"
+      hidden
+      aria-hidden="true"
+      aria-modal="true"
+      role="dialog"
+      tabindex="-1"
+    >
+      <div class="image-modal-stage">
+        <button id="modal-close" type="button" class="modal-close" aria-label="关闭预览">关闭</button>
+        <img id="modal-image" alt="放大预览图" />
+        <p class="modal-hint">点击空白处、图片或按 Esc 关闭</p>
+      </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+    <script src="./static/recognizer.js?v=20260402b"></script>
+    <script src="./static/app.js?v=20260402d"></script>
+  </body>
+</html>

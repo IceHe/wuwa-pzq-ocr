@@ -1,0 +1,10 @@
+.DS_Store
+.history/
+__pycache__/
+*.pyc
+.venv/
+.venv312/
+.cache/
+.env
+images/
+.codex
