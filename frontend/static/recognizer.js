@@ -28,8 +28,8 @@
   };
 
   const STAT_DEFINITIONS = [
-    { name: "暴击", allowedValues: [6.3, 6.9, 7.5, 8.1, 8.7, 9.3, 9.9, 10.5], isPercent: true, aliases: ["暴市", "暴山", "景击"] },
-    { name: "暴击伤害", allowedValues: [12.6, 13.8, 15.0, 16.2, 17.4, 18.6, 19.8, 21.0], isPercent: true, aliases: ["暴伤", "暴击份害", "暴击仿害"] },
+    { name: "暴击", allowedValues: [6.3, 6.9, 7.5, 8.1, 8.7, 9.3, 9.9, 10.5], isPercent: true, aliases: ["暴市", "暴山", "景击", "黑击", "此市", "稍市"] },
+    { name: "暴击伤害", allowedValues: [12.6, 13.8, 15.0, 16.2, 17.4, 18.6, 19.8, 21.0], isPercent: true, aliases: ["暴伤", "暴击份害", "暴击仿害", "加击伤害"] },
     { name: "攻击", allowedValues: [6.4, 7.1, 7.9, 8.6, 9.4, 10.1, 10.9, 11.6], isPercent: true, aliases: ["功击"] },
     { name: "生命", allowedValues: [6.4, 7.1, 7.9, 8.6, 9.4, 10.1, 10.9, 11.6], isPercent: true, aliases: ["生俞"] },
     { name: "防御", allowedValues: [8.1, 9.0, 10.0, 10.9, 11.8, 12.8, 13.8, 14.7], isPercent: true, aliases: ["防卸"] },
@@ -388,13 +388,32 @@
     }
 
     const tolerance = definition.isPercent ? VALUE_SNAP_TOLERANCE_PERCENT : VALUE_SNAP_TOLERANCE_FLAT;
-    const snapped = Math.abs(nearest - numeric) <= tolerance ? nearest : numeric;
-    const tier = snapped === nearest ? definition.allowedValues.indexOf(nearest) + 1 : null;
+    const noisyPercentSnap = snapNoisyPercentValue(definition, rawValue, numeric);
+    const snapped = noisyPercentSnap ?? (Math.abs(nearest - numeric) <= tolerance ? nearest : numeric);
+    const snappedIndex = definition.allowedValues.indexOf(snapped);
+    const tier = snappedIndex >= 0 ? snappedIndex + 1 : null;
 
     if (definition.isPercent) {
       return { value: `${snapped.toFixed(1)}%`, tier };
     }
     return { value: Number.isInteger(snapped) ? String(Math.round(snapped)) : snapped.toFixed(1), tier };
+  }
+
+  function snapNoisyPercentValue(definition, rawValue, numeric) {
+    if (!definition?.isPercent || numeric < 30) {
+      return null;
+    }
+    const digits = cleanValueText(rawValue).replace(/\D/g, "");
+    if (digits.length < 3) {
+      return null;
+    }
+    for (const candidate of definition.allowedValues) {
+      const candidateDigits = candidate.toFixed(1).replace(".", "");
+      if (digits.startsWith(candidateDigits)) {
+        return candidate;
+      }
+    }
+    return null;
   }
 
   function extractUserIdFromText(text) {
@@ -674,7 +693,7 @@
         name: normalizedName.name,
         value: normalizedValue.value,
         is_locked: detectLock(rowCanvas),
-        is_new: false,
+        is_new: side === "right",
         tier: normalizedValue.tier,
         confidence,
         name_confidence: nameConfidence,
@@ -719,7 +738,7 @@
       };
       const userIdCrop = cropCanvas(sourceCanvas, userIdBox);
       const userIdResult = await this.readText(userIdCrop, "user_id");
-      const userIdRaw = String(userIdResult.text || "").replace(/\s+/g, "").replace("特征码", "特征码:") || null;
+      const userIdRaw = String(userIdResult.text || "").replace(/\s+/g, "").replace(/^特征码[:：]?/, "特征码:") || null;
       const userId = extractUserIdFromText(userIdRaw);
 
       const originalStats = [];

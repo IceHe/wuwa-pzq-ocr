@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import json
 import tempfile
 import unittest
 from datetime import datetime
@@ -8,6 +9,13 @@ from pathlib import Path
 from unittest.mock import patch
 
 from backend.app import build_uploaded_image_name, create_app
+
+
+def _valid_rows(*, locked: bool = False, is_new: bool = False) -> list[dict[str, object]]:
+    return [
+        {"name": "暴击", "value": "6.3%", "tier": 1, "is_locked": locked and index == 0, "is_new": is_new, "confidence": 0.92}
+        for index in range(5)
+    ]
 
 
 class WebAppTest(unittest.TestCase):
@@ -26,7 +34,7 @@ class WebAppTest(unittest.TestCase):
         self.assertIn("tesseract.min.js", body)
         self.assertIn("./static/favicon.svg?v=20260402b", body)
         self.assertIn("./static/styles.css?v=20260503a", body)
-        self.assertIn("./static/app.js?v=20260503a", body)
+        self.assertIn("./static/app.js?v=20260503k", body)
         self.assertIn('id="history-latest"', body)
         self.assertIn('id="history-prev"', body)
         self.assertIn('id="history-next"', body)
@@ -51,7 +59,7 @@ class WebAppTest(unittest.TestCase):
         body = response.get_data(as_text=True)
         self.assertIn("./static/favicon.svg?v=20260402b", body)
         self.assertIn("./static/styles.css?v=20260503a", body)
-        self.assertIn("./static/app.js?v=20260503a", body)
+        self.assertIn("./static/app.js?v=20260503k", body)
 
     def test_prefixed_health_endpoint(self) -> None:
         response = self.client.get("/browser-ocr/api/health")
@@ -68,8 +76,8 @@ class WebAppTest(unittest.TestCase):
             },
             "result": {
                 "user_id": "120003177",
-                "original_stats": [{"name": "暴击", "value": "6.3%", "tier": 1, "is_locked": True}],
-                "new_stats": [{"name": "暴击伤害", "value": "12.6%", "tier": 1, "is_locked": False}],
+                "original_stats": _valid_rows(locked=True),
+                "new_stats": _valid_rows(is_new=True),
             },
         }
         response = self.client.post("/api/rebuild_log", json=payload, headers={"X-Forwarded-For": "203.0.113.8, 10.0.0.1"})
@@ -78,6 +86,10 @@ class WebAppTest(unittest.TestCase):
         insert_rebuild_log.assert_called_once_with(
             {
                 **payload,
+                "result": {
+                    **payload["result"],
+                    "quality": {"ok": True, "errors": [], "warnings": [], "failed_rows": []},
+                },
                 "request_meta": {"ip": "203.0.113.8"},
             }
         )
@@ -88,8 +100,8 @@ class WebAppTest(unittest.TestCase):
             "filename": "sample.png",
             "result": {
                 "user_id": "120003177",
-                "original_stats": [{"name": "暴击", "value": "6.3%", "tier": 1, "is_locked": True}],
-                "new_stats": [{"name": "暴击伤害", "value": "12.6%", "tier": 1, "is_locked": False}],
+                "original_stats": _valid_rows(locked=True),
+                "new_stats": _valid_rows(is_new=True),
             },
         }
         response = self.client.post("/api/rebuild_log", json=payload, headers={"X-Real-IP": "198.51.100.9"})
@@ -98,6 +110,10 @@ class WebAppTest(unittest.TestCase):
         insert_rebuild_log.assert_called_once_with(
             {
                 **payload,
+                "result": {
+                    **payload["result"],
+                    "quality": {"ok": True, "errors": [], "warnings": [], "failed_rows": []},
+                },
                 "request_meta": {"ip": "198.51.100.9"},
             }
         )
@@ -106,6 +122,26 @@ class WebAppTest(unittest.TestCase):
         response = self.client.post("/api/rebuild_log", data="oops", content_type="text/plain")
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.get_json(), {"ok": False, "error": "invalid_json"})
+
+    @patch("backend.app.insert_rebuild_log")
+    def test_create_rebuild_log_rejects_low_quality_ocr(self, insert_rebuild_log) -> None:
+        payload = {
+            "filename": "sample.png",
+            "result": {
+                "user_id": "120003177",
+                "original_stats": [
+                    {"name": "黑击", "value": "10504", "tier": None, "is_locked": True, "confidence": 0.18},
+                    *_valid_rows()[1:],
+                ],
+                "new_stats": _valid_rows(is_new=True),
+            },
+        }
+        response = self.client.post("/api/rebuild_log", json=payload)
+        self.assertEqual(response.status_code, 400)
+        body = response.get_json()
+        self.assertEqual(body["error"], "ocr_quality_failed")
+        self.assertFalse(body["quality"]["ok"])
+        insert_rebuild_log.assert_not_called()
 
     @patch("backend.app.update_rebuild_log_uploaded_image", return_value=True)
     @patch("backend.app.save_uploaded_image", return_value="N_测试上传者_20260402_120102.png")
@@ -169,6 +205,38 @@ class WebAppTest(unittest.TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.get_json(), {"ok": False, "error": "invalid_image_type"})
         save_uploaded_image.assert_called_once()
+
+    def test_create_ocr_failure_saves_failed_sample(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            failed_dir = Path(temp_dir)
+            payload = {
+                "filename": "sample.png",
+                "result": {
+                    "user_id": "120003177",
+                    "original_stats": _valid_rows(),
+                    "new_stats": _valid_rows(is_new=True),
+                },
+            }
+            quality = {"ok": False, "errors": [{"code": "invalid_name"}], "failed_rows": [{"field": "original_stats", "index": 1}]}
+            with patch("backend.app.FAILED_SAMPLES_DIR", failed_dir):
+                response = self.client.post(
+                    "/api/ocr_failure",
+                    data={
+                        "nickname": "测试上传者",
+                        "payload": json.dumps(payload, ensure_ascii=False),
+                        "quality": json.dumps(quality, ensure_ascii=False),
+                        "image": (io.BytesIO(b"fake-image-bytes"), "sample.png", "image/png"),
+                    },
+                    content_type="multipart/form-data",
+                    headers={"X-Real-IP": "198.51.100.9"},
+                )
+
+            self.assertEqual(response.status_code, 200)
+            body = response.get_json()
+            self.assertTrue(body["filename"].startswith("F_测试上传者_"))
+            self.assertEqual(body["sample_id"], f"failed-samples/{body['filename']}")
+            self.assertTrue((failed_dir / body["filename"]).exists())
+            self.assertTrue((failed_dir / f"{body['filename']}.json").exists())
 
     @patch("backend.app.update_rebuild_log_uploaded_image", return_value=False)
     @patch("backend.app.save_uploaded_image", return_value="N_测试上传者_20260402_120102.png")

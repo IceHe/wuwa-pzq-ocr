@@ -74,6 +74,37 @@ const STAT_COLOR_CLASS_BY_NAME = {
   "共鸣解放": "stat-liberation",
 };
 
+const QUALITY_STAT_VALUE_TABLE = {
+  "暴击": { values: [6.3, 6.9, 7.5, 8.1, 8.7, 9.3, 9.9, 10.5], isPercent: true },
+  "暴击伤害": { values: [12.6, 13.8, 15.0, 16.2, 17.4, 18.6, 19.8, 21.0], isPercent: true },
+  "攻击": { values: [6.4, 7.1, 7.9, 8.6, 9.4, 10.1, 10.9, 11.6], isPercent: true },
+  "生命": { values: [6.4, 7.1, 7.9, 8.6, 9.4, 10.1, 10.9, 11.6], isPercent: true },
+  "防御": { values: [8.1, 9.0, 10.0, 10.9, 11.8, 12.8, 13.8, 14.7], isPercent: true },
+  "共鸣效率": { values: [6.8, 7.6, 8.4, 9.2, 10.0, 10.8, 11.6, 12.4], isPercent: true },
+  "普攻伤害加成": { values: [6.4, 7.1, 7.9, 8.6, 9.4, 10.1, 10.9, 11.6], isPercent: true },
+  "重击伤害加成": { values: [6.4, 7.1, 7.9, 8.6, 9.4, 10.1, 10.9, 11.6], isPercent: true },
+  "共鸣技能伤害加成": { values: [6.4, 7.1, 7.9, 8.6, 9.4, 10.1, 10.9, 11.6], isPercent: true },
+  "共鸣解放伤害加成": { values: [6.4, 7.1, 7.9, 8.6, 9.4, 10.1, 10.9, 11.6], isPercent: true },
+  "固定攻击": { values: [30, 40, 50, 60], isPercent: false },
+  "固定生命": { values: [320, 360, 390, 430, 470, 510, 540, 580], isPercent: false },
+  "固定防御": { values: [40, 50, 60, 70], isPercent: false },
+};
+
+const QUALITY_STAT_NAMES = new Set([
+  "暴击",
+  "暴击伤害",
+  "攻击",
+  "生命",
+  "防御",
+  "共鸣效率",
+  "普攻伤害加成",
+  "重击伤害加成",
+  "共鸣技能伤害加成",
+  "共鸣解放伤害加成",
+]);
+
+const QUALITY_MIN_ROW_CONFIDENCE = 0.35;
+
 fileInput.addEventListener("change", (event) => {
   const [file] = event.target.files || [];
   setCurrentFile(file || null);
@@ -199,10 +230,19 @@ submitButton.addEventListener("click", async () => {
     const payload = await currentRecognizer.recognizeFile(currentFile, (message) => {
       setStatus(`浏览器本地识别中: ${message}`);
     });
+    const quality = evaluateRecognitionQuality(payload);
+    if (payload.result) {
+      payload.result.quality = quality;
+    }
     renderResult(payload);
-    if (!shouldSaveRebuildLog(payload)) {
+    if (!quality.ok) {
       selectedHistoryId = null;
-      setStatus("识别完成，但结果疑似失败，未保存记录", "warning");
+      try {
+        const failure = await uploadOcrFailure(fileToUpload, payload, quality);
+        setStatus(`识别失败，未保存线上记录；已加入失败样本 ${failure.sample_id}。${formatQualitySummary(quality)}`, "warning");
+      } catch (failureError) {
+        setStatus(`识别失败，未保存线上记录；失败样本保存失败: ${failureError.message}。${formatQualitySummary(quality)}`, "warning");
+      }
       return;
     }
     const saveResponse = await saveRebuildLog(payload);
@@ -343,6 +383,34 @@ async function uploadRecognizedImage(file, logId) {
   return data;
 }
 
+async function uploadOcrFailure(file, payload, quality) {
+  if (!(file instanceof File)) {
+    throw new Error("missing_image");
+  }
+
+  const formData = new FormData();
+  formData.append("image", file, file.name || "clipboard.png");
+  formData.append("payload", JSON.stringify(payload));
+  formData.append("quality", JSON.stringify(quality));
+
+  const uploaderInfo = readUploaderInfo();
+  if (uploaderInfo.nickname) {
+    formData.append("nickname", uploaderInfo.nickname);
+  }
+
+  const response = await fetch("./api/ocr_failure", {
+    method: "POST",
+    body: formData,
+  });
+
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || !data.ok) {
+    const error = data.error || `HTTP ${response.status}`;
+    throw new Error(error);
+  }
+  return data;
+}
+
 function buildSavePayload(payload) {
   return {
     ...payload,
@@ -364,19 +432,139 @@ function normalizeOptionalText(value) {
   return text || "";
 }
 
-function hasRecognizedStat(row) {
-  return Boolean(row && row.name && row.value);
-}
-
-function countRecognizedStats(rows) {
-  return (rows || []).filter(hasRecognizedStat).length;
-}
-
-function shouldSaveRebuildLog(payload) {
+function evaluateRecognitionQuality(payload) {
   const result = payload?.result || {};
-  const originalRecognized = countRecognizedStats(result.original_stats);
-  const newRecognized = countRecognizedStats(result.new_stats);
-  return originalRecognized === 5 && newRecognized === 5;
+  const errors = [];
+  const warnings = [];
+  const failedRows = [];
+
+  const userId = String(result.user_id || result.user_id_raw || "");
+  if (!/\d{6,}/.test(userId)) {
+    errors.push({ code: "invalid_user_id", path: "result.user_id", message: "未识别到有效特征码" });
+  }
+
+  evaluateQualityRows(errors, warnings, failedRows, "original_stats", result.original_stats);
+  evaluateQualityRows(errors, warnings, failedRows, "new_stats", result.new_stats);
+
+  return {
+    ok: errors.length === 0,
+    errors,
+    warnings,
+    failed_rows: failedRows,
+  };
+}
+
+function evaluateQualityRows(errors, warnings, failedRows, field, rows) {
+  if (!Array.isArray(rows) || rows.length !== 5) {
+    errors.push({ code: "invalid_row_count", path: `result.${field}`, message: "词条行数不是 5" });
+    return;
+  }
+
+  rows.forEach((row, index) => {
+    const path = `result.${field}[${index}]`;
+    const rowCodes = [];
+    const name = String(row?.name || "").trim();
+    const value = String(row?.value || "").trim();
+
+    if (!QUALITY_STAT_NAMES.has(name)) {
+      errors.push({ code: "invalid_name", path: `${path}.name`, message: "词条名未匹配", actual: name });
+      rowCodes.push("invalid_name");
+    }
+
+    if (!value) {
+      errors.push({ code: "missing_value", path: `${path}.value`, message: "词条数值为空" });
+      rowCodes.push("missing_value");
+    } else if (QUALITY_STAT_NAMES.has(name)) {
+      const inferredTier = inferQualityTier(name, value);
+      if (!inferredTier) {
+        errors.push({ code: "invalid_value", path: `${path}.value`, message: "数值不在合法档位表内", actual: value });
+        rowCodes.push("invalid_value");
+      } else if (row?.tier != null && row.tier !== "" && Number(row.tier) !== inferredTier) {
+        errors.push({ code: "invalid_tier", path: `${path}.tier`, message: "档位与数值不一致", actual: row.tier, expected: inferredTier });
+        rowCodes.push("invalid_tier");
+      }
+    }
+
+    const confidence = parseQualityConfidence(row?.confidence);
+    if (confidence != null && confidence < QUALITY_MIN_ROW_CONFIDENCE) {
+      errors.push({ code: "low_confidence", path: `${path}.confidence`, message: "OCR 置信度过低", actual: confidence, minimum: QUALITY_MIN_ROW_CONFIDENCE });
+      rowCodes.push("low_confidence");
+    }
+
+    if (row?.name_raw && name && !QUALITY_STAT_NAMES.has(name)) {
+      warnings.push({ code: "raw_name_unmatched", path: `${path}.name_raw`, actual: row.name_raw });
+    }
+
+    if (rowCodes.length) {
+      failedRows.push({ field, index: index + 1, codes: rowCodes, name, value });
+    }
+  });
+}
+
+function inferQualityTier(name, rawValue) {
+  const definition = resolveQualityDefinition(name, rawValue);
+  const numeric = parseQualityNumber(rawValue);
+  if (!definition || numeric == null) {
+    return null;
+  }
+
+  let nearestIndex = 0;
+  for (let index = 1; index < definition.values.length; index += 1) {
+    if (Math.abs(definition.values[index] - numeric) < Math.abs(definition.values[nearestIndex] - numeric)) {
+      nearestIndex = index;
+    }
+  }
+
+  const tolerance = definition.isPercent ? 0.11 : 0.5;
+  return Math.abs(definition.values[nearestIndex] - numeric) <= tolerance ? nearestIndex + 1 : null;
+}
+
+function resolveQualityDefinition(name, rawValue) {
+  const value = String(rawValue || "");
+  if (["攻击", "生命", "防御"].includes(name) && !value.includes("%")) {
+    return QUALITY_STAT_VALUE_TABLE[`固定${name}`] || null;
+  }
+  return QUALITY_STAT_VALUE_TABLE[name] || null;
+}
+
+function parseQualityNumber(rawValue) {
+  const match = String(rawValue || "").replaceAll(",", "").match(/\d+(?:\.\d+)?/);
+  if (!match) {
+    return null;
+  }
+  const numeric = Number(match[0]);
+  return Number.isFinite(numeric) ? numeric : null;
+}
+
+function parseQualityConfidence(rawValue) {
+  if (rawValue == null || rawValue === "") {
+    return null;
+  }
+  let value = Number(rawValue);
+  if (!Number.isFinite(value)) {
+    return null;
+  }
+  if (value > 1) {
+    value /= 100;
+  }
+  return Math.max(0, Math.min(1, value));
+}
+
+function formatQualitySummary(quality) {
+  const failedRows = quality.failed_rows || [];
+  if (!failedRows.length) {
+    return "请检查特征码和词条。";
+  }
+  const labelByField = {
+    original_stats: "原",
+    new_stats: "新",
+  };
+  const sample = failedRows
+    .slice(0, 6)
+    .map((row) => `${labelByField[row.field] || row.field}${row.index}:${(row.codes || []).join("/")}`)
+    .join("，");
+  const suffix = failedRows.length > 6 ? `，另有 ${failedRows.length - 6} 行` : "";
+  return `失败行 ${sample}${suffix}。`;
 }
 
 async function refreshHistory() {

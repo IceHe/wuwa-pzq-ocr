@@ -73,6 +73,7 @@ npm run start
 - 图片不会先上传到后端，前端 OCR 逻辑始终在浏览器内执行
 - 识别成功后，页面会把结果提交到后端并写入 PostgreSQL 的 `wuwa_rebuild_log`
 - 如果不是 1 小时内的重复记录，页面会继续上传原始截图并保存到 `images/`
+- 如果识别结果未通过质量检查，页面不会写入 `wuwa_rebuild_log`，而是把原图、raw OCR 和失败原因保存到 `failed-samples/`
 - 页面支持填写上传者昵称、邮箱、微信、QQ，随记录一起保存
 - 页面支持查看最近历史记录、分页跳转和回填查看详情
 - 原始 JSON 默认折叠，预览图支持点击放大，支持点击空白处、图片本身或按 `Esc` 关闭
@@ -182,6 +183,17 @@ ANNOTATION_PASSWORD=<your-password>
 
 标签保存到独立文件 `annotations/rebuild_labels.json`，不会写入线上用户数据表 `public.wuwa_rebuild_log`。训练、回归和调参过程也应只读取线上表或图片文件，不应更新、删除或复用 `wuwa_rebuild_log` 保存中间结果。
 
+识别失败样本会保存到 `failed-samples/`，并在标注后台中显示为“失败待标注”样本组。该目录已加入 `.gitignore`，用于持续收集失败截图、raw OCR 和质量检查错误；人工标注后，标签仍统一写入 `annotations/rebuild_labels.json`。
+
+线上结果保存前有质量闸门：
+
+- 必须识别到有效特征码
+- 左右各 5 行都必须是已知词条
+- 数值必须能匹配项目内档位表
+- 有置信度字段时，过低置信度会阻止保存
+
+这不是在线训练 Tesseract 模型，而是“失败样本 -> 标注 -> 回归 -> 修正规则”的闭环。当前浏览器 OCR 架构下，新增失败样本主要用于扩充别名、定位、预处理和质量规则。
+
 标注页内的“浏览器回归”会在当前浏览器中批量调用同一套前端 OCR，与已保存标签比对，并把报告写入 `reports/ocr-regression/`。`reports/` 已加入 `.gitignore`。
 
 记录去重规则：
@@ -216,6 +228,8 @@ systemctl stop wuwa-ocr.service
   - 保存识别结果和上传者信息
 - `POST /api/rebuild_image`
   - 关联上传原始截图，表单字段包含 `image`、`log_id`，可选 `nickname`
+- `POST /api/ocr_failure`
+  - 保存识别失败样本，表单字段包含 `image`、`payload`、`quality`，可选 `nickname`
 - `GET /api/rebuild_logs?limit=20&offset=0`
   - 分页获取历史记录
 - `GET /api/rebuild_log/<id>`

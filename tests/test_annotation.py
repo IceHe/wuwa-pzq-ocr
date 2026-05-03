@@ -30,6 +30,7 @@ class AnnotationTest(unittest.TestCase):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.root = Path(self.temp_dir.name)
         self.groups = (
+            SampleGroup("failed-samples", "失败待标注", self.root / "failed-samples"),
             SampleGroup("samples-20260503", "2026-05-03 新样本", self.root / "samples-20260503"),
             SampleGroup("images", "线上上传样本", self.root / "images"),
             SampleGroup("samples", "旧回归样本", self.root / "samples"),
@@ -86,9 +87,9 @@ class AnnotationTest(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         payload = response.get_json()
         self.assertTrue(payload["ok"])
-        self.assertEqual([group["key"] for group in payload["groups"]], ["samples-20260503", "images", "samples"])
-        self.assertEqual([group["count"] for group in payload["groups"]], [1, 1, 1])
-        self.assertEqual(payload["stats"], {"total": 3, "completed": 0})
+        self.assertEqual([group["key"] for group in payload["groups"]], ["failed-samples", "samples-20260503", "images", "samples"])
+        self.assertEqual([group["count"] for group in payload["groups"]], [1, 1, 1, 1])
+        self.assertEqual(payload["stats"], {"total": 4, "completed": 0})
         self.assertEqual(payload["items"][0]["image_size"], {"width": 1, "height": 1})
 
     def test_image_route_serves_sample_after_login(self) -> None:

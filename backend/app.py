@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import random
 import re
@@ -10,6 +11,7 @@ from pathlib import Path
 from flask import Flask, jsonify, render_template, request, send_from_directory
 
 from backend.annotation import configure_annotation_session, register_annotation_routes
+from backend.ocr_quality import validate_recognition_payload
 from backend.rebuild_log import (
     get_rebuild_log,
     insert_rebuild_log,
@@ -20,6 +22,7 @@ from backend.rebuild_log import (
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 FRONTEND_DIR = PROJECT_ROOT / "frontend"
 IMAGES_DIR = PROJECT_ROOT / "images"
+FAILED_SAMPLES_DIR = PROJECT_ROOT / "failed-samples"
 ALLOWED_IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp"}
 MIMETYPE_TO_EXTENSION = {
     "image/png": ".png",
@@ -107,6 +110,75 @@ def save_uploaded_image(uploaded_file, uploader_nickname: str, request_ip: str) 
     return target_name
 
 
+def build_failure_sample_name(
+    uploader_nickname: str,
+    request_ip: str,
+    original_filename: str,
+    mimetype: str | None = None,
+    *,
+    now: datetime | None = None,
+    failed_samples_dir: Path | None = None,
+) -> str:
+    current_time = now or datetime.now()
+    timestamp = current_time.strftime("%Y%m%d_%H%M%S")
+    nickname_token = _sanitize_filename_token(uploader_nickname)
+    ip_token = _sanitize_filename_token(request_ip, allow_dot=True) or "unknown"
+    source_stem = _sanitize_filename_token(Path(original_filename or "sample").stem)[:48] or "sample"
+    prefix = f"F_{nickname_token}" if nickname_token else f"F_IP_{ip_token}"
+    extension = _guess_image_extension(original_filename, mimetype)
+    stem = f"{prefix}_{timestamp}_{source_stem}"
+    target_dir = failed_samples_dir or FAILED_SAMPLES_DIR
+    candidate = f"{stem}{extension}"
+
+    while (target_dir / candidate).exists() or (target_dir / f"{candidate}.json").exists():
+        random_suffix = random.choice(string.ascii_letters)
+        candidate = f"{stem}_{random_suffix}{extension}"
+
+    return candidate
+
+
+def save_ocr_failure_sample(
+    uploaded_file,
+    *,
+    payload: dict,
+    quality: dict,
+    uploader_nickname: str,
+    request_ip: str,
+) -> str:
+    if uploaded_file is None:
+        raise ValueError("missing_image")
+
+    mimetype = (uploaded_file.mimetype or "").lower()
+    if not mimetype.startswith("image/"):
+        raise ValueError("invalid_image_type")
+
+    FAILED_SAMPLES_DIR.mkdir(parents=True, exist_ok=True)
+    target_name = build_failure_sample_name(
+        uploader_nickname=uploader_nickname,
+        request_ip=request_ip,
+        original_filename=uploaded_file.filename or "",
+        mimetype=mimetype,
+    )
+    target_path = FAILED_SAMPLES_DIR / target_name
+    uploaded_file.save(target_path)
+
+    metadata = {
+        "version": 1,
+        "created_at": datetime.now().isoformat(timespec="seconds"),
+        "filename": target_name,
+        "original_filename": uploaded_file.filename or "",
+        "request_ip": request_ip,
+        "uploader_nickname": uploader_nickname,
+        "quality": quality,
+        "payload": payload,
+    }
+    metadata_path = FAILED_SAMPLES_DIR / f"{target_name}.json"
+    temp_path = metadata_path.with_name(f"{metadata_path.name}.tmp")
+    temp_path.write_text(json.dumps(metadata, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    temp_path.replace(metadata_path)
+    return target_name
+
+
 def _resolve_saved_image_path(filename: str) -> Path:
     safe_name = _sanitize_filename_token(filename, allow_dot=True)
     if not safe_name or safe_name != str(filename or "").strip():
@@ -153,6 +225,11 @@ def create_app() -> Flask:
         request_meta = dict(raw_request_meta) if isinstance(raw_request_meta, dict) else {}
         request_meta["ip"] = _get_request_ip()
         save_payload["request_meta"] = request_meta
+        quality = validate_recognition_payload(save_payload)
+        if not quality["ok"]:
+            return jsonify({"ok": False, "error": "ocr_quality_failed", "quality": quality}), 400
+        if isinstance(save_payload.get("result"), dict):
+            save_payload["result"]["quality"] = quality
 
         try:
             inserted_id, duplicated = insert_rebuild_log(save_payload)
@@ -160,6 +237,40 @@ def create_app() -> Flask:
             return jsonify({"ok": False, "error": str(exc)}), 500
 
         return jsonify({"ok": True, "id": inserted_id, "duplicated": duplicated})
+
+    @app.post("/api/ocr_failure")
+    @app.post("/browser-ocr/api/ocr_failure")
+    def create_ocr_failure():
+        uploaded_file = request.files.get("image")
+        uploader_nickname = request.form.get("nickname", "")
+        try:
+            payload = json.loads(request.form.get("payload") or "{}")
+        except json.JSONDecodeError:
+            return jsonify({"ok": False, "error": "invalid_payload_json"}), 400
+        try:
+            quality = json.loads(request.form.get("quality") or "{}")
+        except json.JSONDecodeError:
+            return jsonify({"ok": False, "error": "invalid_quality_json"}), 400
+
+        if not isinstance(payload, dict):
+            return jsonify({"ok": False, "error": "invalid_payload_json"}), 400
+        if not isinstance(quality, dict) or "ok" not in quality:
+            quality = validate_recognition_payload(payload)
+
+        try:
+            saved_filename = save_ocr_failure_sample(
+                uploaded_file,
+                payload=payload,
+                quality=quality,
+                uploader_nickname=uploader_nickname,
+                request_ip=_get_request_ip(),
+            )
+        except ValueError as exc:
+            return jsonify({"ok": False, "error": str(exc)}), 400
+        except Exception as exc:
+            return jsonify({"ok": False, "error": str(exc)}), 500
+
+        return jsonify({"ok": True, "filename": saved_filename, "sample_id": f"failed-samples/{saved_filename}"})
 
     @app.post("/api/rebuild_image")
     @app.post("/browser-ocr/api/rebuild_image")

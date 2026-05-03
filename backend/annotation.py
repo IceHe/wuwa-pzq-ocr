@@ -28,6 +28,7 @@ class SampleGroup:
 
 
 SAMPLE_GROUPS = (
+    SampleGroup("failed-samples", "失败待标注", PROJECT_ROOT / "failed-samples"),
     SampleGroup("samples-20260503", "2026-05-03 新样本", PROJECT_ROOT / "samples-20260503"),
     SampleGroup("images", "线上上传样本", PROJECT_ROOT / "images"),
     SampleGroup("samples", "旧回归样本", PROJECT_ROOT / "samples"),
