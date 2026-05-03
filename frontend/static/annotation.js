@@ -785,9 +785,57 @@
       filename: item.filename,
       passed: errors.length === 0,
       errors,
+      diagnostics: buildDiagnostics(expected, actual),
       expected,
       actual,
     };
+  }
+
+  function buildDiagnostics(expected, actual) {
+    return {
+      layout: actual.layout || null,
+      scale: actual.scale ?? null,
+      anchor_box: actual.anchor_box || null,
+      user_id: {
+        expected: normalizeScalar(expected.user_id),
+        actual: normalizeScalar(actual.user_id),
+        raw: actual.user_id_raw || "",
+        box: actual.user_id_box || null,
+        confidence: actual.user_id_confidence ?? null,
+      },
+      original_rows: buildRowDiagnostics(expected.original_stats || [], actual.original_stats || []),
+      new_rows: buildRowDiagnostics(expected.new_stats || [], actual.new_stats || []),
+    };
+  }
+
+  function buildRowDiagnostics(expectedRows, actualRows) {
+    return Array.from({ length: 5 }, (_, index) => {
+      const expected = expectedRows[index] || {};
+      const actual = actualRows[index] || {};
+      return {
+        index: index + 1,
+        expected: {
+          name: normalizeScalar(expected.name),
+          value: normalizeScalar(expected.value),
+          tier: normalizeScalar(expected.tier),
+          is_locked: Boolean(expected.is_locked),
+        },
+        actual: {
+          name: normalizeScalar(actual.name),
+          value: normalizeScalar(actual.value),
+          tier: normalizeScalar(actual.tier),
+          is_locked: Boolean(actual.is_locked),
+        },
+        raw: {
+          name: actual.name_raw || "",
+          value: actual.value_raw || "",
+        },
+        confidence: actual.confidence ?? null,
+        row_box: actual.row_box || null,
+        name_box: actual.name_box || null,
+        value_box: actual.value_box || null,
+      };
+    });
   }
 
   function compareRows(errors, field, expectedRows, actualRows, compareLock) {
@@ -854,8 +902,14 @@
     ];
     for (const item of failedItems.slice(0, 20)) {
       lines.push(`- ${item.id}`);
+      lines.push(`  layout: ${formatLayoutDiagnostics(item.diagnostics)}`);
+      lines.push(`  user_id: expected=${JSON.stringify(item.diagnostics.user_id.expected)} actual=${JSON.stringify(item.diagnostics.user_id.actual)} raw=${JSON.stringify(item.diagnostics.user_id.raw)}`);
       for (const error of item.errors.slice(0, 12)) {
         lines.push(`  ${error.path}: expected=${JSON.stringify(error.expected)} actual=${JSON.stringify(error.actual)}`);
+        const rowDebug = formatErrorRowDebug(item.diagnostics, error.path);
+        if (rowDebug) {
+          lines.push(`    ${rowDebug}`);
+        }
       }
     }
     if (!failedItems.length) {
@@ -866,6 +920,40 @@
     }
     output.hidden = false;
     output.textContent = lines.join("\n");
+  }
+
+  function formatLayoutDiagnostics(diagnostics) {
+    const layout = diagnostics?.layout || {};
+    const parts = [];
+    if (layout.name) {
+      parts.push(layout.name);
+    }
+    if (layout.score != null) {
+      parts.push(`score=${Number(layout.score).toFixed(2)}`);
+    }
+    if (layout.offset_y != null) {
+      parts.push(`offsetY=${layout.offset_y}`);
+    }
+    return parts.length ? parts.join(" ") : "n/a";
+  }
+
+  function formatErrorRowDebug(diagnostics, path) {
+    const match = String(path || "").match(/^(original_stats|new_stats)\[(\d+)\]/);
+    if (!match) {
+      return "";
+    }
+    const rows = match[1] === "original_stats" ? diagnostics.original_rows : diagnostics.new_rows;
+    const row = rows?.[Number(match[2]) - 1];
+    if (!row) {
+      return "";
+    }
+    const confidence = row.confidence == null ? "n/a" : Number(row.confidence).toFixed(2);
+    return [
+      `rawName=${JSON.stringify(row.raw.name)}`,
+      `rawValue=${JSON.stringify(row.raw.value)}`,
+      `confidence=${confidence}`,
+      `rowBox=${JSON.stringify(row.row_box)}`,
+    ].join(" ");
   }
 
   initApp();
