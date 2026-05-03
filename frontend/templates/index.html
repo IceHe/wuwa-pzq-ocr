@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>声骸频整识别记录</title>
     <link rel="icon" type="image/svg+xml" href="./static/favicon.svg?v=20260402b" />
-    <link rel="stylesheet" href="./static/styles.css?v=20260402b" />
+    <link rel="stylesheet" href="./static/styles.css?v=20260503a" />
   </head>
   <body>
     <div class="page-shell">
@@ -118,6 +118,20 @@
             <pre id="json-output"></pre>
           </details>
 
+          <section class="history-image-card" id="history-image-card" hidden>
+            <div class="panel-head history-image-head">
+              <div>
+                <h2>历史原图</h2>
+                <div class="hint" id="history-image-name">未加载</div>
+              </div>
+              <button id="history-image-open" type="button" class="ghost-button">放大查看</button>
+            </div>
+            <button id="history-image-button" type="button" class="history-image-button" aria-label="放大历史原图">
+              <img id="history-image" alt="历史记录原图" />
+            </button>
+            <p class="history-image-message" id="history-image-message"></p>
+          </section>
+
           <section class="history-card">
             <div class="panel-head history-head">
               <div>
@@ -162,6 +176,6 @@
 
     <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
     <script src="./static/recognizer.js?v=20260402b"></script>
-    <script src="./static/app.js?v=20260402d"></script>
+    <script src="./static/app.js?v=20260503a"></script>
   </body>
 </html>

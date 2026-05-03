@@ -25,13 +25,16 @@ class WebAppTest(unittest.TestCase):
         self.assertIn("点击空白处、图片或按 Esc 关闭", body)
         self.assertIn("tesseract.min.js", body)
         self.assertIn("./static/favicon.svg?v=20260402b", body)
-        self.assertIn("./static/styles.css?v=20260402b", body)
-        self.assertIn("./static/app.js?v=20260402d", body)
+        self.assertIn("./static/styles.css?v=20260503a", body)
+        self.assertIn("./static/app.js?v=20260503a", body)
         self.assertIn('id="history-latest"', body)
         self.assertIn('id="history-prev"', body)
         self.assertIn('id="history-next"', body)
         self.assertIn('id="history-page-input"', body)
         self.assertIn('id="history-jump"', body)
+        self.assertIn('id="history-image-card"', body)
+        self.assertIn('id="history-image"', body)
+        self.assertIn('id="history-image-open"', body)
         self.assertIn('id="uploader-nickname"', body)
         self.assertIn('id="uploader-email"', body)
         self.assertIn('id="uploader-wechat"', body)
@@ -47,8 +50,8 @@ class WebAppTest(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         body = response.get_data(as_text=True)
         self.assertIn("./static/favicon.svg?v=20260402b", body)
-        self.assertIn("./static/styles.css?v=20260402b", body)
-        self.assertIn("./static/app.js?v=20260402d", body)
+        self.assertIn("./static/styles.css?v=20260503a", body)
+        self.assertIn("./static/app.js?v=20260503a", body)
 
     def test_prefixed_health_endpoint(self) -> None:
         response = self.client.get("/browser-ocr/api/health")
@@ -195,6 +198,30 @@ class WebAppTest(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.get_json(), {"ok": True, "item": {"id": 7, "locked_count": 1, "locked_positions": [2], "uploaded_image": "N_test_20260402_120102.png", "payload": {"filename": "a.png"}}})
         get_rebuild_log.assert_called_once_with(7)
+
+    def test_fetch_rebuild_image(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            image_dir = Path(temp_dir)
+            image_path = image_dir / "sample.png"
+            image_path.write_bytes(b"fake-image-bytes")
+
+            with patch("backend.app.IMAGES_DIR", image_dir):
+                response = self.client.get("/api/rebuild_image/sample.png")
+                body = response.get_data()
+                response.close()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(body, b"fake-image-bytes")
+
+    def test_fetch_rebuild_image_rejects_path_traversal(self) -> None:
+        response = self.client.get("/api/rebuild_image/../secret.png")
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.get_json(), {"ok": False, "error": "invalid_image_name"})
+
+    def test_prefixed_fetch_rebuild_image_rejects_invalid_type(self) -> None:
+        response = self.client.get("/browser-ocr/api/rebuild_image/sample.txt")
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.get_json(), {"ok": False, "error": "invalid_image_type"})
 
     def test_build_uploaded_image_name_uses_nickname_when_present(self) -> None:
         filename = build_uploaded_image_name(

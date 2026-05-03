@@ -107,6 +107,19 @@ def save_uploaded_image(uploaded_file, uploader_nickname: str, request_ip: str) 
     return target_name
 
 
+def _resolve_saved_image_path(filename: str) -> Path:
+    safe_name = _sanitize_filename_token(filename, allow_dot=True)
+    if not safe_name or safe_name != str(filename or "").strip():
+        raise ValueError("invalid_image_name")
+    if Path(safe_name).suffix.lower() not in ALLOWED_IMAGE_EXTENSIONS:
+        raise ValueError("invalid_image_type")
+
+    image_path = IMAGES_DIR / safe_name
+    if not image_path.is_file():
+        raise FileNotFoundError(safe_name)
+    return image_path
+
+
 def create_app() -> Flask:
     app = Flask(
         __name__,
@@ -223,6 +236,18 @@ def create_app() -> Flask:
             return jsonify({"ok": False, "error": "not_found"}), 404
 
         return jsonify({"ok": True, "item": item})
+
+    @app.get("/api/rebuild_image/<path:filename>")
+    @app.get("/browser-ocr/api/rebuild_image/<path:filename>")
+    def fetch_rebuild_image(filename: str):
+        try:
+            image_path = _resolve_saved_image_path(filename)
+        except ValueError as exc:
+            return jsonify({"ok": False, "error": str(exc)}), 400
+        except FileNotFoundError:
+            return jsonify({"ok": False, "error": "image_not_found"}), 404
+
+        return send_from_directory(IMAGES_DIR, image_path.name)
 
     @app.get("/browser-ocr/static/<path:filename>")
     def prefixed_static(filename: str):

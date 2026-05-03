@@ -20,6 +20,12 @@ const originalTable = document.getElementById("original-table");
 const newTable = document.getElementById("new-table");
 const jsonCard = document.getElementById("json-card");
 const jsonOutput = document.getElementById("json-output");
+const historyImageCard = document.getElementById("history-image-card");
+const historyImage = document.getElementById("history-image");
+const historyImageName = document.getElementById("history-image-name");
+const historyImageOpen = document.getElementById("history-image-open");
+const historyImageButton = document.getElementById("history-image-button");
+const historyImageMessage = document.getElementById("history-image-message");
 const historyList = document.getElementById("history-list");
 const historyStatus = document.getElementById("history-status");
 const historyRefresh = document.getElementById("history-refresh");
@@ -41,6 +47,7 @@ let recognizer = null;
 let selectedHistoryId = null;
 let historyOffset = 0;
 let historyHasMore = false;
+let historyImageUrl = "";
 
 const HISTORY_PAGE_SIZE = 20;
 
@@ -112,12 +119,22 @@ clearButton.addEventListener("click", () => {
 previewOpen.addEventListener("click", (event) => {
   event.preventDefault();
   event.stopPropagation();
-  openImageModal();
+  openImageModal(previewUrl);
 });
 zoomButton.addEventListener("click", (event) => {
   event.preventDefault();
   event.stopPropagation();
-  openImageModal();
+  openImageModal(previewUrl);
+});
+historyImageOpen.addEventListener("click", (event) => {
+  event.preventDefault();
+  event.stopPropagation();
+  openImageModal(historyImageUrl);
+});
+historyImageButton.addEventListener("click", (event) => {
+  event.preventDefault();
+  event.stopPropagation();
+  openImageModal(historyImageUrl);
 });
 modalClose.addEventListener("click", (event) => {
   event.preventDefault();
@@ -243,6 +260,7 @@ function setCurrentFile(file) {
   previewImage.src = previewUrl;
   previewName.textContent = `${file.name || "clipboard.png"} · ${formatSize(file.size)}`;
   previewCard.hidden = false;
+  clearHistoryImage();
 }
 
 function resetResult() {
@@ -255,6 +273,7 @@ function resetResult() {
   originalTable.innerHTML = "";
   newTable.innerHTML = "";
   jsonOutput.textContent = "";
+  clearHistoryImage();
 }
 
 function renderResult(payload) {
@@ -472,6 +491,7 @@ async function openHistory(logId) {
     }
     selectedHistoryId = logId;
     renderResult(data.item.payload || {});
+    renderHistoryImage(data.item);
     await refreshHistory();
     revealSelectedHistory();
     setStatus(`已加载记录 #${logId}`, "success");
@@ -499,13 +519,13 @@ function revealSelectedHistory() {
   selectedItem.scrollIntoView({ block: "nearest", behavior: "smooth" });
 }
 
-function openImageModal() {
-  if (!previewUrl || modalOpen) {
+function openImageModal(imageUrl = previewUrl) {
+  if (!imageUrl || modalOpen) {
     return;
   }
   modalOpen = true;
   lastFocusedElement = document.activeElement;
-  modalImage.src = previewUrl;
+  modalImage.src = imageUrl;
   imageModal.hidden = false;
   imageModal.classList.add("is-open");
   imageModal.setAttribute("aria-hidden", "false");
@@ -528,6 +548,39 @@ function closeImageModal() {
   }
   lastFocusedElement = null;
 }
+
+function clearHistoryImage() {
+  historyImageUrl = "";
+  historyImageCard.hidden = true;
+  historyImage.removeAttribute("src");
+  historyImageName.textContent = "未加载";
+  historyImageMessage.textContent = "";
+}
+
+function renderHistoryImage(item) {
+  const uploadedImage = String(item?.uploaded_image || "").trim();
+  if (!uploadedImage) {
+    clearHistoryImage();
+    return;
+  }
+
+  historyImageUrl = `./api/rebuild_image/${encodeURIComponent(uploadedImage)}`;
+  historyImageName.textContent = uploadedImage;
+  historyImageMessage.textContent = "";
+  historyImageOpen.disabled = false;
+  historyImageButton.disabled = false;
+  historyImage.src = historyImageUrl;
+  historyImageCard.hidden = false;
+}
+
+historyImage.addEventListener("error", () => {
+  if (!historyImageUrl) {
+    return;
+  }
+  historyImageMessage.textContent = "原图加载失败或文件不存在";
+  historyImageOpen.disabled = true;
+  historyImageButton.disabled = true;
+});
 
 function buildTable(rows, otherRows = []) {
   const content = rows.map((row, index) => {
