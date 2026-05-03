@@ -1,0 +1,19 @@
+{
+  "name": "wuwa-pzq-ocr",
+  "private": true,
+  "scripts": {
+    "start": "./scripts/start_web.sh 8012",
+    "start:local": "PORT=8012 HOST=127.0.0.1 ./scripts/start_web.sh",
+    "check:js": "node --check frontend/static/app.js && node --check frontend/static/annotation.js && node --check frontend/static/recognizer.js",
+    "test:py": ".venv312/bin/python -m unittest discover -s tests",
+    "test": "npm run check:js && npm run test:py",
+    "db:init": "./scripts/init_db.sh",
+    "db:backup": "./scripts/backup_db.sh",
+    "service:install": "SERVICE_NAME=wuwa-ocr.service ./scripts/install_service.sh",
+    "service:restart": "systemctl restart wuwa-ocr.service",
+    "service:status": "systemctl status --no-pager -l wuwa-ocr.service",
+    "service:logs": "journalctl -u wuwa-ocr.service -n 120 --no-pager",
+    "health": "curl -fsS http://127.0.0.1:8012/api/health",
+    "deploy": "npm run service:restart && npm run health"
+  }
+}

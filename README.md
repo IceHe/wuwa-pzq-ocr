@@ -61,7 +61,7 @@ DATABASE_URL=postgresql://<user>:<password>@<host>:5432/<database>
 ## Web 界面
 
 ```bash
-./scripts/start_web.sh 8012
+npm run start
 ```
 
 默认地址是 `http://127.0.0.1:8012`。
@@ -78,6 +78,71 @@ DATABASE_URL=postgresql://<user>:<password>@<host>:5432/<database>
 - 原始 JSON 默认折叠，预览图支持点击放大，支持点击空白处、图片本身或按 `Esc` 关闭
 - 如果 8012 也被占用，可以执行 `./scripts/start_web.sh 8080` 或 `PORT=8080 ./scripts/start_web.sh`
 - 默认以单进程模式启动，避免 Flask debug reloader 额外占用端口；如需调试可执行 `DEBUG=1 ./scripts/start_web.sh`
+
+## 常用命令
+
+仓库提供 `package.json` 作为统一命令入口，不需要安装 Node 依赖；只要求系统有 `node` 和 `npm`。
+
+```bash
+npm run start
+npm run test
+npm run db:backup
+npm run service:restart
+npm run health
+```
+
+常用脚本：
+
+- `npm run start`
+  - 本地以前台方式启动 Flask 服务，端口 `8012`
+- `npm run test`
+  - 执行前端 JS 语法检查和 Python 单元测试
+- `npm run db:backup`
+  - 备份 PostgreSQL 数据库到 `backups/db/`
+- `npm run service:install`
+  - 安装/更新 systemd 服务
+- `npm run service:restart`
+  - 重启线上 systemd 服务
+- `npm run service:status`
+  - 查看线上 systemd 服务状态
+- `npm run service:logs`
+  - 查看线上 systemd 服务最近日志
+- `npm run deploy`
+  - 重启线上服务并执行健康检查
+
+## 服务部署
+
+线上 systemd 服务名固定为：
+
+```text
+wuwa-ocr.service
+```
+
+安装或更新 systemd unit：
+
+```bash
+npm run service:install
+```
+
+重启服务：
+
+```bash
+npm run service:restart
+```
+
+检查服务状态：
+
+```bash
+npm run service:status
+```
+
+健康检查：
+
+```bash
+npm run health
+```
+
+当前服务监听 `0.0.0.0:8012`，本机健康检查地址是 `http://127.0.0.1:8012/api/health`。如果通过 nginx 子路径访问，也可以检查 `http://127.0.0.1:8012/browser-ocr/api/health`。
 
 ## 数据备份
 
@@ -135,6 +200,12 @@ ANNOTATION_PASSWORD=<your-password>
 Ctrl + C
 ```
 
+如果是 systemd 方式运行，停止服务：
+
+```bash
+systemctl stop wuwa-ocr.service
+```
+
 ## API 概览
 
 页面同时支持根路径和 `/browser-ocr/` 前缀两套入口，便于直接启动或挂到 nginx 子路径。
@@ -170,5 +241,14 @@ Ctrl + C
 ## 测试
 
 ```bash
+npm run test
+```
+
+等价于：
+
+```bash
+node --check frontend/static/app.js
+node --check frontend/static/annotation.js
+node --check frontend/static/recognizer.js
 .venv312/bin/python -m unittest discover -s tests
 ```

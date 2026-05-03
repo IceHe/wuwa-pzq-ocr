@@ -2,8 +2,8 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-DEFAULT_SERVICE_NAME="ocr.service"
-LEGACY_SERVICE_NAME="wuwa-ocr.service"
+DEFAULT_SERVICE_NAME="wuwa-ocr.service"
+LEGACY_SERVICE_NAME="ocr.service"
 if [[ -n "${SERVICE_NAME:-}" ]]; then
   SERVICE_NAME="${SERVICE_NAME}"
 elif [[ -f "/etc/systemd/system/${LEGACY_SERVICE_NAME}" && ! -f "/etc/systemd/system/${DEFAULT_SERVICE_NAME}" ]]; then
