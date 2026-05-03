@@ -525,6 +525,7 @@ code {
   margin: 14px 0 0;
 }
 
+.debug-output,
 .regression-output {
   max-height: 420px;
   margin: 14px 0 0;
@@ -535,6 +536,12 @@ code {
   color: var(--ink);
   background: rgba(255, 255, 255, 0.6);
   white-space: pre-wrap;
+}
+
+.debug-output {
+  max-height: 300px;
+  border-color: rgba(82, 102, 66, 0.28);
+  background: rgba(255, 250, 240, 0.74);
 }
 
 .is-error {

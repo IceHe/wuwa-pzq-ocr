@@ -313,6 +313,7 @@
     if (image) {
       image.src = item.image_url;
     }
+    clearOcrDebug();
 
     $("#editor-title").textContent = item.filename;
     const size = item.image_size ? `${item.image_size.width}x${item.image_size.height}` : "unknown";
@@ -657,6 +658,7 @@
         return;
       }
       const result = ocr.result || {};
+      renderOcrDebug(result);
       const draft = {
         ...createEmptyLabel(item),
         user_id: result.user_id || "",
@@ -670,6 +672,7 @@
       setStatus(automatic ? "已自动预填 OCR 草稿，请逐项确认后保存" : "已导入 OCR 草稿，请逐项确认后保存", "success");
     } catch (error) {
       setStatus(`${automatic ? "自动预填失败" : "OCR 草稿导入失败"}: ${error.message}`, "error");
+      clearOcrDebug();
     } finally {
       if (state.ocrDraftRequestId === requestId) {
         setOcrBusy(false);
@@ -920,6 +923,70 @@
     }
     output.hidden = false;
     output.textContent = lines.join("\n");
+  }
+
+  function clearOcrDebug() {
+    const output = $("#ocr-debug-output");
+    if (!output) {
+      return;
+    }
+    output.hidden = true;
+    output.textContent = "";
+  }
+
+  function renderOcrDebug(result) {
+    const output = $("#ocr-debug-output");
+    if (!output) {
+      return;
+    }
+    const layout = result.layout || {};
+    const lines = [
+      "当前样本 OCR 调试:",
+      `layout: ${formatLayoutDiagnostics({ layout })}`,
+      `top candidates: ${formatLayoutCandidates(layout.candidates || [])}`,
+      `user_id: actual=${JSON.stringify(result.user_id || "")} raw=${JSON.stringify(result.user_id_raw || "")} variant=${result.user_id_variant || "n/a"} confidence=${formatConfidence(result.user_id_confidence)}`,
+      `user_id_box: ${JSON.stringify(result.user_id_box || null)}`,
+      "",
+      "原词条:",
+      ...formatDebugRows(result.original_stats || []),
+      "",
+      "新词条:",
+      ...formatDebugRows(result.new_stats || []),
+    ];
+    output.hidden = false;
+    output.textContent = lines.join("\n");
+  }
+
+  function formatLayoutCandidates(candidates) {
+    if (!candidates.length) {
+      return "n/a";
+    }
+    return candidates
+      .map((candidate) => `refY=${candidate.reference_offset_y} offsetY=${candidate.offset_y} score=${Number(candidate.score).toFixed(3)}`)
+      .join(" | ");
+  }
+
+  function formatDebugRows(rows) {
+    return Array.from({ length: 5 }, (_, index) => {
+      const row = rows[index] || {};
+      const nameBox = row.name_box ? JSON.stringify(row.name_box) : "n/a";
+      const valueBox = row.value_box ? JSON.stringify(row.value_box) : "n/a";
+      return [
+        `${index + 1}.`,
+        `${row.name || "-"} ${row.value || "-"} ${row.tier ? `T${row.tier}` : "T-"}`,
+        `locked=${Boolean(row.is_locked)}`,
+        `rawName=${JSON.stringify(row.name_raw || "")}`,
+        `rawValue=${JSON.stringify(row.value_raw || "")}`,
+        `variant=${row.name_variant || "n/a"}/${row.value_variant || "n/a"}`,
+        `confidence=${formatConfidence(row.confidence)}`,
+        `nameBox=${nameBox}`,
+        `valueBox=${valueBox}`,
+      ].join(" ");
+    });
+  }
+
+  function formatConfidence(value) {
+    return value == null ? "n/a" : Number(value).toFixed(2);
   }
 
   function formatLayoutDiagnostics(diagnostics) {

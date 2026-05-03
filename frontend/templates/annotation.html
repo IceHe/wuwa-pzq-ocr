@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>OCR 标注后台</title>
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg?v=20260402b" />
-    <link rel="stylesheet" href="/static/annotation.css?v=20260503i" />
+    <link rel="stylesheet" href="/static/annotation.css?v=20260503j" />
   </head>
   <body
     data-annotation-configured="{{ '1' if annotation_configured else '0' }}"
@@ -115,6 +115,7 @@
             </div>
 
             <p id="annotation-status" class="status-text">等待加载样本</p>
+            <pre id="ocr-debug-output" class="debug-output" hidden></pre>
             <pre id="regression-output" class="regression-output" hidden></pre>
           </section>
         </section>
@@ -123,8 +124,8 @@
 
     {% if annotation_authenticated %}
       <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
-      <script src="/static/recognizer.js?v=20260402b"></script>
+      <script src="/static/recognizer.js?v=20260503j"></script>
     {% endif %}
-    <script src="/static/annotation.js?v=20260503i"></script>
+    <script src="/static/annotation.js?v=20260503j"></script>
   </body>
 </html>
