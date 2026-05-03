@@ -20,6 +20,12 @@
   const VALUE_SNAP_TOLERANCE_FLAT = 25.0;
   const LOCK_BRIGHT_THRESHOLD = 170;
   const LOCK_BRIGHT_RATIO = 0.1;
+  const REFERENCE_PANEL_Y_OFFSETS = [-84, -60, -36, -18, 0, 18, 36, 60, 84];
+  const OCR_ACCEPT_SCORE = {
+    name: 3.2,
+    value: 2.8,
+    user_id: 8.0,
+  };
 
   const STAT_DEFINITIONS = [
     { name: "暴击", allowedValues: [6.3, 6.9, 7.5, 8.1, 8.7, 9.3, 9.9, 10.5], isPercent: true, aliases: ["暴市", "暴山", "景击"] },
@@ -87,6 +93,10 @@
       width: Math.max(1, Math.round(box.width * scale)),
       height: Math.max(1, Math.round(box.height * scale)),
     };
+  }
+
+  function offsetBox(box, offsetY) {
+    return { ...box, y: box.y + offsetY };
   }
 
   function buildRowBoxes(panelBox, scale) {
@@ -162,6 +172,51 @@
     return padded;
   }
 
+  function preprocessAdaptiveCrop(canvas) {
+    const targetHeight = 112;
+    const scale = Math.max(1, targetHeight / Math.max(1, canvas.height));
+    const scaledWidth = Math.max(1, Math.round(canvas.width * scale));
+    const scaledHeight = Math.max(1, Math.round(canvas.height * scale));
+    const resized = createCanvas(scaledWidth, scaledHeight);
+    const resizedContext = resized.getContext("2d", { willReadFrequently: true });
+    resizedContext.drawImage(canvas, 0, 0, scaledWidth, scaledHeight);
+
+    const imageData = resizedContext.getImageData(0, 0, scaledWidth, scaledHeight);
+    const data = imageData.data;
+    const grayValues = new Uint8ClampedArray(scaledWidth * scaledHeight);
+    let sum = 0;
+    let sumSquares = 0;
+    for (let index = 0, pixel = 0; index < data.length; index += 4, pixel += 1) {
+      const maxChannel = Math.max(data[index], data[index + 1], data[index + 2]);
+      const minChannel = Math.min(data[index], data[index + 1], data[index + 2]);
+      const luminance = data[index] * 0.299 + data[index + 1] * 0.587 + data[index + 2] * 0.114;
+      const gray = Math.max(0, Math.min(255, Math.round(maxChannel * 0.68 + luminance * 0.32 - (maxChannel - minChannel) * 0.12)));
+      grayValues[pixel] = gray;
+      sum += gray;
+      sumSquares += gray * gray;
+    }
+
+    const mean = sum / Math.max(1, grayValues.length);
+    const variance = Math.max(0, sumSquares / Math.max(1, grayValues.length) - mean * mean);
+    const threshold = Math.max(118, Math.min(218, mean + Math.sqrt(variance) * 0.45));
+    for (let index = 0, pixel = 0; index < data.length; index += 4, pixel += 1) {
+      const isText = grayValues[pixel] >= threshold;
+      const value = isText ? 0 : 255;
+      data[index] = value;
+      data[index + 1] = value;
+      data[index + 2] = value;
+      data[index + 3] = 255;
+    }
+    resizedContext.putImageData(imageData, 0, 0);
+
+    const padded = createCanvas(scaledWidth + 48, scaledHeight + 32);
+    const paddedContext = padded.getContext("2d");
+    paddedContext.fillStyle = "#fff";
+    paddedContext.fillRect(0, 0, padded.width, padded.height);
+    paddedContext.drawImage(resized, 24, 16);
+    return padded;
+  }
+
   function cleanText(text) {
     return String(text || "")
       .replaceAll(" ", "")
@@ -219,6 +274,51 @@
     }
     const longest = Math.max(a.length, b.length, 1);
     return 1 - levenshteinDistance(a, b) / longest;
+  }
+
+  function bestNameMatchScore(rawName) {
+    const text = cleanText(rawName);
+    if (!text) {
+      return 0;
+    }
+    if (STAT_NAME_INDEX.has(text)) {
+      return 1;
+    }
+
+    let bestScore = 0;
+    for (const candidate of STAT_NAME_INDEX.keys()) {
+      bestScore = Math.max(bestScore, similarity(text, candidate));
+    }
+    return bestScore;
+  }
+
+  function scoreOcrText(text, confidence, mode) {
+    const normalizedConfidence = typeof confidence === "number" ? Math.max(0, Math.min(1, confidence)) : 0;
+    if (mode === "user_id") {
+      const userId = extractUserIdFromText(text);
+      if (userId) {
+        return 9 + Math.min(2, userId.length / 8) + normalizedConfidence;
+      }
+      const digits = String(text || "").replace(/\D/g, "").length;
+      return digits ? Math.min(5, digits * 0.45) + normalizedConfidence : normalizedConfidence;
+    }
+
+    if (mode === "value") {
+      const numeric = extractNumber(text);
+      if (numeric == null) {
+        return normalizedConfidence;
+      }
+      const cleaned = cleanValueText(text);
+      const percentBonus = cleaned.includes("%") ? 0.5 : 0;
+      const lengthPenalty = cleaned.length > 8 ? 0.6 : 0;
+      return 3.2 + percentBonus + normalizedConfidence - lengthPenalty;
+    }
+
+    const nameScore = bestNameMatchScore(text);
+    if (!nameScore) {
+      return normalizedConfidence;
+    }
+    return nameScore * 4 + normalizedConfidence;
   }
 
   function disambiguateFixedStat(definition, rawValue) {
@@ -324,6 +424,127 @@
     return bright / pixels > LOCK_BRIGHT_RATIO;
   }
 
+  function scoreImageBox(sourceCanvas, box) {
+    const safeBox = clampBox(box, sourceCanvas.width, sourceCanvas.height);
+    const context = sourceCanvas.getContext("2d", { willReadFrequently: true });
+    const imageData = context.getImageData(safeBox.x, safeBox.y, safeBox.width, safeBox.height).data;
+    const step = Math.max(1, Math.floor(Math.min(safeBox.width, safeBox.height) / 28));
+    let pixels = 0;
+    let bright = 0;
+    let dark = 0;
+    let sum = 0;
+    let sumSquares = 0;
+    let edge = 0;
+    let previousGray = null;
+
+    for (let y = 0; y < safeBox.height; y += step) {
+      previousGray = null;
+      for (let x = 0; x < safeBox.width; x += step) {
+        const index = (y * safeBox.width + x) * 4;
+        const gray = Math.round(imageData[index] * 0.299 + imageData[index + 1] * 0.587 + imageData[index + 2] * 0.114);
+        pixels += 1;
+        sum += gray;
+        sumSquares += gray * gray;
+        if (gray > 155) {
+          bright += 1;
+        }
+        if (gray < 45) {
+          dark += 1;
+        }
+        if (previousGray != null && Math.abs(gray - previousGray) > 42) {
+          edge += 1;
+        }
+        previousGray = gray;
+      }
+    }
+
+    if (!pixels) {
+      return 0;
+    }
+    const mean = sum / pixels;
+    const variance = Math.max(0, sumSquares / pixels - mean * mean);
+    const contrast = Math.sqrt(variance);
+    const brightRatio = bright / pixels;
+    const darkRatio = dark / pixels;
+    const edgeRatio = edge / pixels;
+    const textRatioScore = 1 - Math.min(1, Math.abs(brightRatio - 0.08) / 0.12);
+    const darknessPenalty = darkRatio > 0.82 ? (darkRatio - 0.82) * 2 : 0;
+    const brightnessPenalty = brightRatio > 0.32 ? (brightRatio - 0.32) * 3 : 0;
+    return contrast / 38 + textRatioScore * 1.4 + Math.min(1.7, edgeRatio * 24) - darknessPenalty - brightnessPenalty;
+  }
+
+  function scoreLayoutCandidate(sourceCanvas, candidate) {
+    const rows = [...candidate.originalRows, ...candidate.newRows];
+    if (!rows.length) {
+      return 0;
+    }
+    const rowScores = rows.map((rowBox) => scoreImageBox(sourceCanvas, rowBox));
+    rowScores.sort((left, right) => left - right);
+    const trimmed = rowScores.slice(1, Math.max(2, rowScores.length - 1));
+    const average = trimmed.reduce((sum, score) => sum + score, 0) / Math.max(1, trimmed.length);
+    const centerPenalty = Math.abs(candidate.offsetY) / Math.max(1, candidate.scale * 180);
+    return average - centerPenalty;
+  }
+
+  function selectLayout(sourceCanvas, scale, dx, dy) {
+    const baseOriginalPanel = scaleReferenceBox(REFERENCE_LEFT_PANEL, scale, dx, dy);
+    const baseNewPanel = scaleReferenceBox(REFERENCE_RIGHT_PANEL, scale, dx, dy);
+    const baseAnchorBox = scaleReferenceBox(REFERENCE_ARROW_BOX, scale, dx, dy);
+    const candidates = REFERENCE_PANEL_Y_OFFSETS.map((referenceOffset) => {
+      const offsetY = Math.round(referenceOffset * scale);
+      const originalPanel = offsetBox(baseOriginalPanel, offsetY);
+      const newPanel = offsetBox(baseNewPanel, offsetY);
+      const originalRows = buildRowBoxes(originalPanel, scale);
+      const newRows = buildRowBoxes(newPanel, scale);
+      return {
+        name: referenceOffset === 0 ? "reference" : "offset",
+        reference_offset_y: referenceOffset,
+        offsetY,
+        scale,
+        anchorBox: offsetBox(baseAnchorBox, offsetY),
+        originalPanel,
+        newPanel,
+        originalRows,
+        newRows,
+      };
+    });
+
+    for (const candidate of candidates) {
+      candidate.score = scoreLayoutCandidate(sourceCanvas, candidate);
+    }
+    candidates.sort((left, right) => right.score - left.score);
+    return {
+      ...candidates[0],
+      candidate_count: candidates.length,
+      candidates: candidates.slice(0, 3).map((candidate) => ({
+        reference_offset_y: candidate.reference_offset_y,
+        offset_y: candidate.offsetY,
+        score: Number(candidate.score.toFixed(3)),
+      })),
+    };
+  }
+
+  function rowHasRecognizedText(row) {
+    return Boolean(row && (row.name || row.value || row.tier));
+  }
+
+  function syncLockedRows(originalStats, newStats) {
+    for (let index = 0; index < Math.min(originalStats.length, newStats.length); index += 1) {
+      const original = originalStats[index];
+      const current = newStats[index];
+      if (!original?.is_locked || !rowHasRecognizedText(current)) {
+        continue;
+      }
+      original.name = current.name || original.name;
+      original.value = current.value || original.value;
+      original.tier = current.tier || original.tier;
+      original.name_raw = current.name_raw || original.name_raw;
+      original.value_raw = current.value_raw || original.value_raw;
+      original.name_variant = current.name_variant || original.name_variant;
+      original.value_variant = current.value_variant || original.value_variant;
+    }
+  }
+
   class BrowserRecognizer {
     constructor() {
       this.worker = null;
@@ -371,7 +592,7 @@
       return worker;
     }
 
-    async readText(canvas, mode) {
+    async recognizeTextVariant(canvas, mode, variant) {
       const worker = await this.ensureWorker(this.statusListener);
       const parameters = {
         tessedit_pageseg_mode: "7",
@@ -385,17 +606,49 @@
       }
 
       await this.setParameters(parameters);
-      let result = await worker.recognize(canvas);
-      let text = String(result.data?.text || "").trim();
-      let confidence = typeof result.data?.confidence === "number" ? result.data.confidence / 100 : null;
+      const targetCanvas = variant === "threshold"
+        ? preprocessCrop(canvas)
+        : variant === "adaptive"
+          ? preprocessAdaptiveCrop(canvas)
+          : canvas;
+      const result = await worker.recognize(targetCanvas);
+      const text = String(result.data?.text || "").trim();
+      const confidence = typeof result.data?.confidence === "number" ? result.data.confidence / 100 : null;
+      return {
+        text,
+        confidence,
+        variant,
+        score: scoreOcrText(text, confidence, mode),
+      };
+    }
 
-      if (!text) {
-        result = await worker.recognize(preprocessCrop(canvas));
-        text = String(result.data?.text || "").trim();
-        confidence = typeof result.data?.confidence === "number" ? result.data.confidence / 100 : null;
+    async readText(canvas, mode) {
+      const raw = await this.recognizeTextVariant(canvas, mode, "raw");
+      const variants = [raw];
+      if (raw.score >= (OCR_ACCEPT_SCORE[mode] || 0)) {
+        return {
+          ...raw,
+          variants,
+        };
       }
 
-      return { text, confidence };
+      const threshold = await this.recognizeTextVariant(canvas, mode, "threshold");
+      variants.push(threshold);
+      const bestAfterThreshold = variants.reduce((best, candidate) => (candidate.score > best.score ? candidate : best), raw);
+      if (bestAfterThreshold.score >= (OCR_ACCEPT_SCORE[mode] || 0) + 0.4) {
+        return {
+          ...bestAfterThreshold,
+          variants,
+        };
+      }
+
+      const adaptive = await this.recognizeTextVariant(canvas, mode, "adaptive");
+      variants.push(adaptive);
+      const best = variants.reduce((currentBest, candidate) => (candidate.score > currentBest.score ? candidate : currentBest), raw);
+      return {
+        ...best,
+        variants,
+      };
     }
 
     async recognizeRow(sourceCanvas, rowBox, side) {
@@ -404,8 +657,12 @@
       const nameCanvas = cropCanvas(sourceCanvas, nameBox);
       const valueCanvas = cropCanvas(sourceCanvas, valueBox);
 
-      const { text: nameRaw, confidence: nameConfidence } = await this.readText(nameCanvas, "name");
-      const { text: valueRaw, confidence: valueConfidence } = await this.readText(valueCanvas, "value");
+      const nameResult = await this.readText(nameCanvas, "name");
+      const valueResult = await this.readText(valueCanvas, "value");
+      const nameRaw = nameResult.text;
+      const valueRaw = valueResult.text;
+      const nameConfidence = nameResult.confidence;
+      const valueConfidence = valueResult.confidence;
       const normalizedName = normalizeName(nameRaw, valueRaw);
       const normalizedValue = normalizeValue(normalizedName.definition, valueRaw);
       const confidenceValues = [nameConfidence, valueConfidence].filter((value) => value != null);
@@ -420,9 +677,15 @@
         is_new: false,
         tier: normalizedValue.tier,
         confidence,
+        name_confidence: nameConfidence,
+        value_confidence: valueConfidence,
         name_raw: nameRaw || null,
         value_raw: valueRaw || null,
+        name_variant: nameResult.variant || null,
+        value_variant: valueResult.variant || null,
         row_box: rowBox,
+        name_box: nameBox,
+        value_box: valueBox,
       };
     }
 
@@ -443,11 +706,10 @@
       const dx = Math.round((sourceCanvas.width - REFERENCE_WIDTH * scale) / 2);
       const dy = Math.round((sourceCanvas.height - REFERENCE_HEIGHT * scale) / 2);
 
-      const anchorBox = scaleReferenceBox(REFERENCE_ARROW_BOX, scale, dx, dy);
-      const originalPanel = scaleReferenceBox(REFERENCE_LEFT_PANEL, scale, dx, dy);
-      const newPanel = scaleReferenceBox(REFERENCE_RIGHT_PANEL, scale, dx, dy);
-      const originalRows = buildRowBoxes(originalPanel, scale);
-      const newRows = buildRowBoxes(newPanel, scale);
+      const layout = selectLayout(sourceCanvas, scale, dx, dy);
+      const anchorBox = layout.anchorBox;
+      const originalRows = layout.originalRows;
+      const newRows = layout.newRows;
 
       const userIdBox = {
         x: Math.max(0, sourceCanvas.width - Math.round(REFERENCE_USER_ID_CROP_WIDTH * scale)),
@@ -475,6 +737,7 @@
         }
         newStats.push(await this.recognizeRow(sourceCanvas, rowBox, "right"));
       }
+      syncLockedRows(originalStats, newStats);
 
       if (this.statusListener) {
         this.statusListener("识别完成");
@@ -485,8 +748,21 @@
         result: {
           anchor_box: anchorBox,
           scale,
+          layout: {
+            name: layout.name,
+            score: Number(layout.score.toFixed(3)),
+            offset_y: layout.offsetY,
+            reference_offset_y: layout.reference_offset_y,
+            candidate_count: layout.candidate_count,
+            candidates: layout.candidates,
+            original_panel: layout.originalPanel,
+            new_panel: layout.newPanel,
+          },
           user_id: userId,
           user_id_raw: userIdRaw,
+          user_id_box: userIdBox,
+          user_id_confidence: userIdResult.confidence,
+          user_id_variant: userIdResult.variant || null,
           original_stats: originalStats,
           new_stats: newStats,
         },
