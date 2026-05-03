@@ -79,6 +79,46 @@ DATABASE_URL=postgresql://<user>:<password>@<host>:5432/<database>
 - 如果 8012 也被占用，可以执行 `./scripts/start_web.sh 8080` 或 `PORT=8080 ./scripts/start_web.sh`
 - 默认以单进程模式启动，避免 Flask debug reloader 额外占用端口；如需调试可执行 `DEBUG=1 ./scripts/start_web.sh`
 
+## 数据备份
+
+在标注、调参或批量处理前，先备份线上 PostgreSQL 数据库：
+
+```bash
+./scripts/backup_db.sh
+```
+
+备份文件会写入 `backups/db/wuwa_ocr_<timestamp>.sql`。`backups/` 已加入 `.gitignore`，避免把包含用户信息、IP 和原始 JSON 的 SQL 备份提交到仓库。
+
+## 标注后台
+
+标注后台入口：
+
+```text
+https://pzq.icehe.life/annotation
+```
+
+本地启动后也可以访问：
+
+```text
+http://127.0.0.1:8012/annotation
+```
+
+启用前需要配置口令：
+
+```bash
+ANNOTATION_PASSWORD=<your-password>
+```
+
+标注后台读取 3 组样本：
+
+- `samples-20260503/`
+- `images/`
+- `samples/`
+
+标签保存到独立文件 `annotations/rebuild_labels.json`，不会写入线上用户数据表 `public.wuwa_rebuild_log`。训练、回归和调参过程也应只读取线上表或图片文件，不应更新、删除或复用 `wuwa_rebuild_log` 保存中间结果。
+
+标注页内的“浏览器回归”会在当前浏览器中批量调用同一套前端 OCR，与已保存标签比对，并把报告写入 `reports/ocr-regression/`。`reports/` 已加入 `.gitignore`。
+
 记录去重规则：
 
 - `user_id`

@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>OCR 标注后台</title>
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg?v=20260402b" />
+    <link rel="stylesheet" href="/static/annotation.css?v=20260503i" />
+  </head>
+  <body
+    data-annotation-configured="{{ '1' if annotation_configured else '0' }}"
+    data-annotation-authenticated="{{ '1' if annotation_authenticated else '0' }}"
+  >
+    <main class="annotation-shell">
+      <header class="annotation-hero">
+        <div>
+          <p class="eyebrow">Wuthering Waves OCR</p>
+          <h1>声骸重构样本标注</h1>
+          <p>标注数据独立保存，不写线上识别记录表。样本来源包含新样本、线上上传图片和旧回归样本。</p>
+        </div>
+        {% if annotation_authenticated %}
+          <button id="logout-button" class="ghost-button" type="button">退出</button>
+        {% endif %}
+      </header>
+
+      {% if not annotation_configured %}
+        <section class="state-card">
+          <h2>标注后台未启用</h2>
+          <p>请先在服务环境中配置 <code>ANNOTATION_PASSWORD</code>，然后重启 OCR 服务。</p>
+        </section>
+      {% elif not annotation_authenticated %}
+        <section class="login-card">
+          <h2>输入标注口令</h2>
+          <p>该入口会写入本地标签 JSON，因此需要口令保护。</p>
+          <form id="login-form" class="login-form">
+            <input id="password-input" type="password" autocomplete="current-password" placeholder="ANNOTATION_PASSWORD" autofocus />
+            <button class="primary-button" type="submit">进入标注</button>
+          </form>
+          <p id="login-status" class="status-text"></p>
+        </section>
+      {% else %}
+        <section class="annotation-layout">
+          <aside class="sample-sidebar">
+            <div class="sidebar-head">
+              <div>
+                <h2>样本</h2>
+                <p id="sample-stats" class="hint">加载中</p>
+              </div>
+              <button id="refresh-button" class="ghost-button" type="button">刷新</button>
+            </div>
+            <label class="field">
+              <span>样本组</span>
+              <select id="group-filter"></select>
+            </label>
+            <label class="field">
+              <span>状态</span>
+              <select id="status-filter">
+                <option value="all">全部</option>
+                <option value="todo">未完成</option>
+                <option value="done">已完成</option>
+              </select>
+            </label>
+            <div id="sample-list" class="sample-list"></div>
+          </aside>
+
+          <section class="editor-panel">
+            <div class="editor-head">
+              <div>
+                <h2 id="editor-title">选择样本</h2>
+                <p id="editor-subtitle" class="hint">从左侧选择一张图片开始标注</p>
+              </div>
+              <div class="editor-actions">
+                <button id="prev-button" class="ghost-button" type="button">上一张</button>
+                <button id="next-button" class="ghost-button" type="button">下一张</button>
+                <button id="ocr-draft-button" class="ghost-button" type="button">导入 OCR 草稿</button>
+                <button id="run-regression-button" class="ghost-button" type="button">浏览器回归</button>
+                <button id="save-button" class="primary-button" type="button">保存标签</button>
+              </div>
+            </div>
+
+            <div class="workspace">
+              <section class="image-panel">
+                <img id="sample-image" alt="待标注样本" />
+              </section>
+
+              <form id="label-form" class="label-form">
+                <label class="field user-id-field">
+                  <span>User ID</span>
+                  <input id="user-id-input" type="text" inputmode="numeric" autocomplete="off" placeholder="例如 120003177" />
+                </label>
+
+                <div class="row-panels">
+                  <section class="row-panel">
+                    <div class="section-head">
+                      <h3>原词条</h3>
+                      <span class="hint">勾选锁定后左右同行自动同步</span>
+                    </div>
+                    <div id="original-rows" class="rows"></div>
+                  </section>
+
+                  <section class="row-panel">
+                    <div class="section-head">
+                      <h3>新词条</h3>
+                      <span class="hint">重构后结果</span>
+                    </div>
+                    <div id="new-rows" class="rows"></div>
+                  </section>
+                </div>
+
+                <label class="field">
+                  <span>备注</span>
+                  <textarea id="notes-input" rows="3" placeholder="可选，记录不确定项或截图异常"></textarea>
+                </label>
+              </form>
+            </div>
+
+            <p id="annotation-status" class="status-text">等待加载样本</p>
+            <pre id="regression-output" class="regression-output" hidden></pre>
+          </section>
+        </section>
+      {% endif %}
+    </main>
+
+    {% if annotation_authenticated %}
+      <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+      <script src="/static/recognizer.js?v=20260402b"></script>
+    {% endif %}
+    <script src="/static/annotation.js?v=20260503i"></script>
+  </body>
+</html>

@@ -9,6 +9,7 @@ from pathlib import Path
 
 from flask import Flask, jsonify, render_template, request, send_from_directory
 
+from backend.annotation import configure_annotation_session, register_annotation_routes
 from backend.rebuild_log import (
     get_rebuild_log,
     insert_rebuild_log,
@@ -114,6 +115,8 @@ def create_app() -> Flask:
         static_url_path="/static",
     )
     app.config["JSON_AS_ASCII"] = False
+    configure_annotation_session(app)
+    register_annotation_routes(app)
 
     @app.get("/")
     @app.get("/browser-ocr/")

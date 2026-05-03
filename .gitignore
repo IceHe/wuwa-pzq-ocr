@@ -7,4 +7,6 @@ __pycache__/
 .cache/
 .env
 images/
+backups/
+reports/
 .codex
